@@ -1,0 +1,4 @@
+Stock,Year,Event,Reference Date,Actual Start Date,Base Start Date,Base End Date,Base Trading Days,Base Price,Status,Base Period High,Base Period Low,Analysis Start Date,Analysis End Date,Analysis Trading Days,Highest High,Highest High Date,Lowest Low,Lowest Low Date,Upside %,Downside %,High-Low %,Highest Close,Highest Close %,Lowest Close,Lowest Close %
+KALYANI,2025,20-March,2025-03-20,2025-07-02,,,,,INSUFFICIENT_BASE_DATA,,,,,,,,,,,,,,,,
+KALYANI,2025,20-September,2025-09-20,2026-08-28,,,,,INSUFFICIENT_BASE_DATA,,,,,,,,,,,,,,,,
+KALYANI,2026,20-March,2026-03-20,2026-08-28,,,,,INSUFFICIENT_BASE_DATA,,,,,,,,,,,,,,,,
