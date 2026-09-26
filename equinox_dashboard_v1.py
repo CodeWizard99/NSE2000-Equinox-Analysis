@@ -1,3 +1,4 @@
+
 import os
 from pathlib import Path
 
@@ -12,11 +13,6 @@ import streamlit as st
 DEFAULT_DATA_FILE = os.getenv(
     "EQUINOX_ANALYSIS_FILE",
     "output/stock_semiannual_analysis.csv",
-)
-
-DEFAULT_FNO_FILE = os.getenv(
-    "EQUINOX_FNO_FILE",
-    "output/FNO.csv",
 )
 
 REQUIRED_COLUMNS = [
@@ -93,37 +89,6 @@ def load_data(file_path: str) -> pd.DataFrame:
     df = df[df["Cycle"].notna()].copy()
 
     return df
-
-
-@st.cache_data(show_spinner=False)
-def load_fno_symbols(file_path: str):
-    """
-    Load the supplied F&O stock list and return normalized symbols.
-    """
-
-    path = Path(file_path)
-
-    if not path.exists():
-        raise FileNotFoundError(
-            f"F&O file not found: {file_path}"
-        )
-
-    fno_df = pd.read_csv(path)
-
-    if "Symbol" not in fno_df.columns:
-        raise ValueError(
-            "F&O file must contain a 'Symbol' column."
-        )
-
-    symbols = (
-        fno_df["Symbol"]
-        .dropna()
-        .astype(str)
-        .str.strip() # type: ignore
-        .str.upper()
-    )
-
-    return set(symbols)
 
 
 # ============================================================
@@ -340,65 +305,17 @@ daily_data_directory = st.sidebar.text_input(
     help="Directory containing STOCK.csv files such as RELIANCE.csv.",
 )
 
-fno_file = st.sidebar.text_input(
-    "F&O stock list CSV",
-    value=DEFAULT_FNO_FILE,
-    help="CSV containing current F&O symbols in a 'Symbol' column.",
-)
-
-fno_only = st.sidebar.checkbox(
-    "F&O Stocks Only",
-    value=False,
-    help=(
-        "When checked, only stocks present in the supplied F&O list "
-        "are included in all dashboard metrics, rankings, cycle "
-        "comparisons, and stock selection."
-    ),
-)
-
 # Keep the directory available to the raw-data viewer.
 os.environ["EQUINOX_DAILY_DATA_DIRECTORY"] = daily_data_directory
 
 try:
     data = load_data(data_file)
-    fno_symbols = load_fno_symbols(fno_file)
 except Exception as exc:
     st.error(str(exc))
     st.stop()
 
-# Normalize dashboard symbols once.
-data["_Stock_Normalized"] = (
-    data["Stock"]
-    .astype(str)
-    .str.strip() # type: ignore
-    .str.upper()
-)
-
-data_symbols = set(
-    data["_Stock_Normalized"].dropna().unique()
-)
-
-matched_fno_symbols = fno_symbols & data_symbols
-
-if fno_only:
-    data = data[
-        data["_Stock_Normalized"].isin(fno_symbols)
-    ].copy()
-
-# Helper column is only for F&O symbol matching.
-data = data.drop(columns=["_Stock_Normalized"], errors="ignore")
-
 min_year_available = int(data["Year"].min())
 max_year_available = int(data["Year"].max())
-
-if fno_only:
-    st.sidebar.success(
-        f"F&O filter ON • {len(matched_fno_symbols):,} matched symbols"
-    )
-else:
-    st.sidebar.caption(
-        f"F&O list loaded • {len(fno_symbols):,} symbols"
-    )
 
 from_year = st.sidebar.number_input(
     "From year (inclusive)",
@@ -461,17 +378,6 @@ ranking_metric = st.sidebar.selectbox(
         "Avg_Downside": "Average Downside %",
     }[x],
 )
-
-# ============================================================
-# MAIN PAGE FILTER STATUS
-# ============================================================
-
-if fno_only:
-    st.info(
-        f"F&O Stocks Only is enabled. "
-        f"{len(matched_fno_symbols):,} F&O symbols from the supplied "
-        f"sheet match the historical stock dataset."
-    )
 
 # ============================================================
 # APPLY FILTERS
@@ -587,12 +493,6 @@ with tab_overview:
 
     st.subheader("How the filtered universe behaves")
 
-    if fno_only:
-        st.caption(
-            "Universe: current F&O symbols from the supplied F&O sheet "
-            "matched against the historical stock dataset."
-        )
-
     summary = cycle_summary(
         filtered,
         threshold=threshold,
@@ -679,16 +579,6 @@ with tab_ranking:
         f"Ranking by {ranking_metric.replace('_', ' ')}"
     )
 
-    if fno_only:
-        st.caption(
-            "Ranking is restricted to stocks present in the supplied F&O list."
-        )
-
-    st.caption(
-        "Click a stock row to see that stock's historical "
-        "20-March / 20-September metrics."
-    )
-
     display_cols = [
         "Rank",
         "Stock",
@@ -736,20 +626,6 @@ with tab_ranking:
         key="stock_ranking_table",
     )
 
-    selected_stock_from_ranking = None
-
-    try:
-        selected_rows = ranking_event.selection.rows
-    except AttributeError:
-        selected_rows = []
-
-    if selected_rows:
-        selected_index = selected_rows[0]
-        if 0 <= selected_index < len(ranking_display):
-            selected_stock_from_ranking = (
-                ranking_display.iloc[selected_index]["Stock"]
-            )
-
     csv_data = ranking_display.to_csv(index=False).encode("utf-8")
 
     st.download_button(
@@ -760,130 +636,70 @@ with tab_ranking:
     )
 
     # --------------------------------------------------------
-    # Open historical March / September metrics when a ranking
-    # row is clicked.
+    # Open the underlying daily CSV when a ranking row is clicked
     # --------------------------------------------------------
 
-    if selected_stock_from_ranking: # type: ignore
+    selected_stock_from_ranking = None
+
+    try:
+        selected_rows = ranking_event.selection.rows
+    except AttributeError:
+        selected_rows = []
+
+    if selected_rows:
+        selected_index = selected_rows[0]
+        if 0 <= selected_index < len(ranking_display):
+            selected_stock_from_ranking = ranking_display.iloc[
+                selected_index
+            ]["Stock"]
+
+    if selected_stock_from_ranking:
         st.markdown("---")
         st.subheader(
-            f"Historical March / September Metrics — "
-            f"{selected_stock_from_ranking}" # type: ignore
+            f"Daily CSV Data — {selected_stock_from_ranking}"
         )
 
-        clicked_stock_data = filtered[
-            filtered["Stock"].eq(selected_stock_from_ranking) # type: ignore
-        ].copy()
-
-        clicked_stock_data = clicked_stock_data.sort_values(
-            ["Year", "Cycle"]
+        raw_csv_path = (
+            Path(daily_data_directory)
+            / f"{selected_stock_from_ranking}.csv"
         )
 
-        metric_cols = [
-            "Year",
-            "Cycle",
-            "Reference Date",
-            "Actual Start Date",
-            "Base Start Date",
-            "Base End Date",
-            "Base Trading Days",
-            "Base Price",
-            "Analysis Start Date",
-            "Analysis End Date",
-            "Analysis Trading Days",
-            "Highest High",
-            "Highest High Date",
-            "Lowest Low",
-            "Lowest Low Date",
-            "Upside %",
-            "Downside %",
-            "High-Low %",
-            "Highest Close",
-            "Highest Close %",
-            "Lowest Close",
-            "Lowest Close %",
-        ]
+        if raw_csv_path.exists():
+            try:
+                raw_df = pd.read_csv(raw_csv_path)
 
-        metric_cols = [
-            col
-            for col in metric_cols
-            if col in clicked_stock_data.columns
-        ]
+                st.caption(
+                    f"{len(raw_df):,} daily rows | "
+                    f"{raw_df['Date'].min()} → {raw_df['Date'].max()}"
+                )
 
-        detail_df = clicked_stock_data[metric_cols].copy()
+                st.dataframe(
+                    raw_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=550,
+                )
 
-        date_cols = [
-            "Reference Date",
-            "Actual Start Date",
-            "Base Start Date",
-            "Base End Date",
-            "Analysis Start Date",
-            "Analysis End Date",
-            "Highest High Date",
-            "Lowest Low Date",
-        ]
+                raw_csv_data = raw_df.to_csv(index=False).encode(
+                    "utf-8"
+                )
 
-        for col in date_cols:
-            if col in detail_df.columns:
-                detail_df[col] = pd.to_datetime(
-                    detail_df[col],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
+                st.download_button(
+                    label=f"Download {selected_stock_from_ranking}.csv",
+                    data=raw_csv_data,
+                    file_name=f"{selected_stock_from_ranking}.csv",
+                    mime="text/csv",
+                    key=f"download_raw_{selected_stock_from_ranking}",
+                )
 
-        st.dataframe(
-            detail_df.style.format(
-                {
-                    "Base Price": "{:.4f}",
-                    "Highest High": "{:.4f}",
-                    "Lowest Low": "{:.4f}",
-                    "Highest Close": "{:.4f}",
-                    "Lowest Close": "{:.4f}",
-                    "Upside %": "{:.2f}%",
-                    "Downside %": "{:.2f}%",
-                    "High-Low %": "{:.2f}%",
-                    "Highest Close %": "{:.2f}%",
-                    "Lowest Close %": "{:.2f}%",
-                },
-                na_rep="-",
-            ),
-            use_container_width=True,
-            hide_index=True,
-            height=500,
-        )
-
-        metrics_csv = detail_df.to_csv(
-            index=False
-        ).encode("utf-8")
-
-        st.download_button(
-            label=(
-                f"Download {selected_stock_from_ranking} " # type: ignore
-                f"March/September metrics CSV"
-            ),
-            data=metrics_csv,
-            file_name=(
-                f"{selected_stock_from_ranking}" # type: ignore
-                "_march_september_metrics.csv"
-            ),
-            mime="text/csv",
-            key=(
-                f"download_event_metrics_"
-                f"{selected_stock_from_ranking}" # type: ignore
-            ),
-        )
-
-        chart_data = clicked_stock_data[
-            ["Year", "Cycle", "Upside %"]
-        ].pivot(
-            index="Year",
-            columns="Cycle",
-            values="Upside %",
-        )
-
-        st.subheader("Historical Upside by Cycle")
-
-        if not chart_data.empty:
-            st.line_chart(chart_data)
+            except Exception as exc:
+                st.error(
+                    f"Unable to read {raw_csv_path}: {exc}"
+                )
+        else:
+            st.warning(
+                f"Underlying daily CSV not found: {raw_csv_path}"
+            )
 
     st.markdown("---")
 
@@ -911,11 +727,6 @@ with tab_ranking:
 with tab_cycles:
 
     st.subheader("March vs September behavior")
-
-    if fno_only:
-        st.caption(
-            "Cycle comparison is restricted to the supplied F&O universe."
-        )
 
     comparison = cycle_comparison(
         filtered,
@@ -998,11 +809,6 @@ with tab_stock:
 
     stocks = sorted(filtered["Stock"].unique())
 
-    if fno_only:
-        st.caption(
-            "Stock selection is restricted to the supplied F&O universe."
-        )
-
     selected_stock = st.selectbox(
         "Select stock",
         stocks,
@@ -1010,7 +816,7 @@ with tab_stock:
 
     st.caption(
         "Tip: click any stock row in the Stock Ranking tab to inspect "
-        "its historical 20-March / 20-September event metrics."
+        "its historical analysis and underlying daily CSV data."
     )
 
     stock_data = filtered[
